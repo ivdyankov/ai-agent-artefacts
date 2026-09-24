@@ -1,192 +1,113 @@
 ---
 name: obsidian-cli
 description: >
-  Manage Obsidian vault via CLI. Use when the user asks to read, write, search,
-  organize, or query notes in their Obsidian vault.
+  Manage an Obsidian vault through its CLI: read, write, search, organize,
+  and query notes.
+user-invocable: true
+disable-model-invocation: true
 ---
 
-# Obsidian CLI Skill
+# Obsidian CLI
 
-## Vault name
+## Setup
 
-On first activation, check for a memory file matching `~/.claude/projects/*/memory/obsidian-vault-config.md`. If it does not exist, ask the user for their Obsidian vault name, then save it as a memory:
+Resolve the vault name from host-provided persistent memory/configuration. Do
+not assume a host-specific path or format. If none exists, ask for the vault
+name and save it using the host's persistence mechanism; if unavailable, use
+it for the session and say it will not persist. Store named mappings for
+multiple vaults and ask which one to use when ambiguous.
 
-```markdown
----
-name: obsidian-vault-config
-description: User's Obsidian vault name for CLI commands
-metadata:
-  type: user
----
+Before any other command:
 
-Vault name: <name>
-```
+1. Run `obsidian --help`. If unavailable, tell the user to enable **Command
+   line interface** in Obsidian → Options → General and restart Obsidian.
+2. Use the installed CLI's documented vault/status command to confirm Obsidian
+   is running and the vault is accessible. If it fails, ask the user to open
+   Obsidian and load the vault.
 
-Then add a pointer line to `MEMORY.md`: `- [Obsidian vault](obsidian-vault-config.md) — vault name for CLI commands`.
+Do not bypass the CLI or read vault files directly. Stop and report prerequisite
+failures instead of using a silent fallback.
 
-## Prerequisites
+## Invocation and safety
 
-Before running any other CLI commands, verify both prerequisites are met:
-
-1. **Obsidian CLI is enabled**: Run `obsidian --help 2>/dev/null`. If this fails or the command is not found, tell the user: "The Obsidian CLI is not available. Please enable it in Obsidian → Options → General → toggle 'Command line interface' on, then restart Obsidian."
-
-2. **Obsidian is running**: Run `obsidian vault vault="<name>" 2>/dev/null` with the vault name from above. If the output contains "Vault not found" or the command fails to connect, tell the user: "Obsidian does not appear to be running or the vault is not open. Please open the Obsidian app and make sure your vault is loaded, then try again."
-
-**Do not bypass the CLI or fall back to reading vault files directly from disk.** If either prerequisite is not met, stop and guide the user through the steps above. Only proceed with CLI commands once both checks pass.
-
-## CLI usage
-
-All operations go through a single Bash call:
+Run one narrowly scoped command per operation:
 
 ```bash
 obsidian <action> [key=value ...] [flags] vault="<name>"
 ```
 
-- `path=<path>` for exact file paths; `file=<name>` for wikilink-style resolution.
-- Quote values with spaces: `path="My Folder/note.md"`.
-- Use `\n` for newlines in content values.
-- Don't suppress stderr by default — real errors (vault offline, bad args) come through there. Only add `2>/dev/null` when you're probing for existence and handling the failure deliberately (as in the prerequisite checks above).
+- Use exact `path=` for targets; use `file=` only for intentional,
+  unambiguous wikilink-style resolution. Quote values with spaces.
+- Pass arguments through a safe argument mechanism. Never interpolate
+  untrusted note content, paths, queries, or vault names into shell commands.
+  Avoid putting sensitive content in history/process arguments when a safer
+  input mechanism exists.
+- Preserve stderr. Use the installed CLI's help/discovery commands for unknown
+  actions or flags; syntax can vary by version.
+- Treat delete, permanent delete, overwrite, move, rename, and bulk
+  property/tag changes as mutations. Resolve the exact target, show the
+  operation, and confirm before destructive, overwriting, bulk, or ambiguous
+  changes.
+- After every mutation, reread the note or check metadata/listings and report
+  the result, skipped items, and errors. Avoid printing whole sensitive notes
+  unless requested.
 
-## Conventions
+## Common conventions
 
-Most commands share a small set of flags worth knowing before reading the action tables:
-
-- **`active`** — operate on the currently-focused note in Obsidian instead of passing `path=`/`file=`. Use this when the user says "this note" or "the open note" without specifying. Supported on `aliases`, `tags`, `properties`, `tasks`, and others.
-- **`format=json|tsv|csv`** (varies per command) — listing/query commands default to TSV or plain text; pass `format=json` when parsing output programmatically. `outline` also supports `format=md|tree|json`; `properties` defaults to `yaml`.
-- **`total`** — return just a count instead of a list. Cheap way to ask "how many" without pulling all the rows.
-- **`verbose`** — usually adds extra columns (paths, types, counts) to listings.
-- **`file=<name>` vs `path=<path>`** — `file=` resolves like a wikilink (just the note name, ambiguous if duplicated); `path=` is exact (`folder/note.md`). When in doubt, prefer `path=`.
+- `active` targets the focused note, when supported by that action.
+- `format=json|tsv|csv` selects machine-readable output where supported;
+  `outline` also supports `md|tree|json`, and `properties` defaults to YAML.
+- `total` returns a count; `verbose` adds details. Prefer `format=json` when
+  parsing output programmatically.
+- Use `\n` for newlines in `content=` values.
 
 ## Actions
 
-### Read & write
+| Actions | Parameters / purpose |
+|---|---|
+| `read` | `path=` — read a note |
+| `create` | `path=`, `content=`; `overwrite`, `template=` optional |
+| `append`, `prepend` | `path=`, `content=`; `inline` optional |
+| `delete` | `path=`; trash by default, `permanent` optional |
+| `move` | `path=`, `to=` |
+| `rename` | `path=`, `name=` |
+| `open` | `path=`; `newtab` optional |
+| `search` | `query=`; `case`, `limit=`, `format=` optional |
+| `search:context` | `query=` — matches with surrounding context |
+| `files`, `folders` | `folder=`; `ext=` and `total` optional |
+| `file`, `vault`, `recents` | Metadata, vault stats (`info=name\|path\|files\|folders\|size`), or recent notes |
+| `outline` | `path=`, `format=md\|tree\|json` |
+| `links`, `backlinks` | `path=`; `counts` optional for backlinks |
+| `wordcount` | `path=` — word/character count |
+| `aliases` | `path=` or vault-wide; `verbose` optional |
+| `unresolved`, `orphans`, `deadends` | Vault hygiene: broken links, unlinked notes, or notes without outgoing links |
+| `properties` | `path=` for frontmatter; omit for vault-wide property names |
+| `property:read` | `path=`, `name=` |
+| `property:set` | `path=`, `name=`, `value=`; `type=text\|list\|number\|checkbox\|date\|datetime` optional |
+| `property:remove` | `path=`, `name=` |
+| `tags` | `path=` or vault-wide; `counts`, `sort=count` optional |
+| `tag` | `name=`; `verbose` lists files |
+| `daily`, `daily:read`, `daily:path` | Open, read, or locate today's daily note |
+| `daily:append`, `daily:prepend` | `content=` for today's daily note |
+| `tasks` | `path=` optional; filter with `done`, `todo`, or `status=`; `verbose` adds lines |
+| `task` | `ref=<path:line>`; `toggle`, `done`, `todo`, or `status=` |
+| `templates` | List templates |
+| `template:read` | `name=`; `resolve` optional |
+| `template:insert` | `name=` into the active note |
+| `bookmarks` | List bookmarks |
+| `bookmark` | One of `file=`, `folder=`, `url=`, `search=`; `title=` optional |
+| `commands` | `filter=` optional; discover command IDs |
+| `command` | `id=` — run a discovered Obsidian command |
 
-| Action | Key parameters | Notes |
-|---|---|---|
-| `read` | `path=` | Read note contents |
-| `create` | `path=` `content=` | Add `overwrite` to replace existing; `template=<name>` to base on a template |
-| `append` | `path=` `content=` | Add `inline` to skip the leading newline |
-| `prepend` | `path=` `content=` | Add `inline` to skip the trailing newline |
-| `delete` | `path=` | Moves to trash; add `permanent` to skip trash |
-| `move` | `path=` `to=` | Move or rename to a new path |
-| `rename` | `path=` `name=` | Rename in place |
-| `open` | `path=` | Open the note in Obsidian (`newtab` for new tab) |
+## Links and note shape
 
-### Search & list
+Use wikilinks for internal references:
+`[[Note]]`, `[[Note|label]]`, `[[Note#Heading]]`, `[[Note^block]]`; use
+`![[Note]]` or `![[Note#Heading]]` for embeds. After link changes, run
+`unresolved` and fix or report broken targets.
 
-| Action | Key parameters | Notes |
-|---|---|---|
-| `search` | `query=` | Add `case` for case-sensitive, `limit=<n>` to cap results, `format=json` to parse |
-| `search:context` | `query=` | Search with surrounding line context |
-| `files` | `folder=` | Optional `ext=` filter; `total` for count only |
-| `folders` | `folder=` | List folders under a parent |
-| `file` | `path=` | File metadata |
-| `vault` | | Vault stats; `info=name\|path\|files\|folders\|size` for one field |
-| `recents` | | Recently opened files |
-
-### Structure & navigation
-
-| Action | Key parameters | Notes |
-|---|---|---|
-| `outline` | `path=` | Headings of a note; `format=md\|json\|tree` |
-| `links` | `path=` | Outgoing links from a note |
-| `backlinks` | `path=` | What links to this note; `counts` adds link counts |
-| `wordcount` | `path=` | Word/character count |
-| `aliases` | `path=` (or vault-wide) | List aliases; `verbose` adds file paths |
-
-### Vault hygiene
-
-| Action | Key parameters | Notes |
-|---|---|---|
-| `unresolved` | | Broken links across the entire vault; `verbose` includes source files. Use this instead of checking links one at a time. |
-| `orphans` | | Notes with no incoming links |
-| `deadends` | | Notes with no outgoing links |
-
-### Properties (frontmatter)
-
-| Action | Key parameters | Notes |
-|---|---|---|
-| `properties` | `path=` | All frontmatter for a file (default `format=yaml`); omit `path=` for vault-wide property names |
-| `property:read` | `path=` `name=` | Read one property |
-| `property:set` | `path=` `name=` `value=` | Add `type=text\|list\|number\|checkbox\|date\|datetime` when the type matters |
-| `property:remove` | `path=` `name=` | Remove a property |
-
-### Tags
-
-| Action | Key parameters | Notes |
-|---|---|---|
-| `tags` | `path=` (or vault-wide) | Add `counts` for occurrence counts, `sort=count` to sort by frequency |
-| `tag` | `name=` | Info about one tag; `verbose` lists files that use it |
-
-### Daily notes
-
-| Action | Key parameters | Notes |
-|---|---|---|
-| `daily` | | Open today's daily note |
-| `daily:read` | | Read today's daily note |
-| `daily:path` | | Get today's daily note path |
-| `daily:append` | `content=` | Append to today's daily note |
-| `daily:prepend` | `content=` | Prepend to today's daily note |
-
-### Tasks
-
-| Action | Key parameters | Notes |
-|---|---|---|
-| `tasks` | `path=` (optional) | List tasks; filter with `done` / `todo` / `status="<char>"`; `verbose` groups by file with line numbers |
-| `task` | `ref=<path:line>` | Show or update one task: `toggle`, `done`, `todo`, or `status="<char>"` |
-
-### Templates
-
-| Action | Key parameters | Notes |
-|---|---|---|
-| `templates` | | List available templates |
-| `template:read` | `name=` | Read template content; `resolve` expands variables |
-| `template:insert` | `name=` | Insert template into the active note |
-
-### Bookmarks
-
-| Action | Key parameters | Notes |
-|---|---|---|
-| `bookmarks` | | List bookmarks; `verbose` includes types |
-| `bookmark` | `file=` / `folder=` / `url=` / `search=` | Add a bookmark; optional `title=` |
-
-### Obsidian commands (advanced)
-
-| Action | Key parameters | Notes |
-|---|---|---|
-| `commands` | `filter=<prefix>` | Discover available Obsidian command IDs |
-| `command` | `id=<command-id>` | Run any Obsidian command (anything in the command palette) |
-
-## Linking notes
-
-When writing note content, use Obsidian's wikilink syntax for internal references:
-
-- `[[Note Name]]` — basic link to another note in the vault
-- `[[Note Name|Display Text]]` — link with custom display text
-- `[[Note Name#Header]]` — link to a specific header inside a note
-- `[[Note Name^block-id]]` — link to a specific block (a line tagged with `^block-id`)
-- `![[Note Name]]` — embed/preview another note's content inline (transclusion)
-- `![[Note Name#Header]]` — embed a specific section
-- `![[image.png]]` — embed an image
-
-Use wikilinks instead of raw paths when one note references another. To find broken links across the vault in one pass, run `obsidian unresolved vault="<name>"` — much better than verifying each target individually. If a link you're about to write would be unresolved, either create the target first or warn the user.
-
-## Splitting large notes
-
-A monolithic note is often the wrong shape. Before creating or appending, evaluate whether the content should be split into several linked notes.
-
-**Split when any of these are true:**
-
-- The note would exceed ~300 lines or cover more than ~3 distinct topics that could stand alone.
-- Some sections are independently useful and likely to be referenced from other notes.
-- Different sections have different update cadences or audiences.
-- The user is producing reusable knowledge (prompts, recipes, runbooks) rather than a single coherent document.
-
-**How to split:**
-
-1. Create an index/parent note that introduces the topic and links to each sub-note via `[[Sub-Note Name]]`.
-2. Each sub-note should be self-contained but include a link back to the parent.
-3. Before creating sub-notes, run `search` or `files` to check whether any of them already exist — if so, link to the existing note instead of duplicating.
-4. Use `![[Sub-Note Name]]` in the parent only when an inline preview adds genuine value; otherwise prefer plain `[[…]]` links.
-
-**Decide, then confirm:** propose the split structure (parent + sub-note titles) to the user before creating files. Do not silently fan a single requested note into many — the user might have wanted one note. Once the user agrees, create the parent and sub-notes in a single batch.
+Before creating or appending, consider splitting notes over ~300 lines, with
+multiple independently useful topics, audiences, or update cadences. Search
+first for existing targets. Propose the parent/sub-note structure and confirm
+before creating files. Preserve frontmatter, aliases, tags, tasks, links,
+embeds, block references, and heading anchors when splitting.

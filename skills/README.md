@@ -1,16 +1,19 @@
 # Claude Code Skills
-My reusable skills for Claude Code.
+
+Reusable, manually invoked skills for Claude Code. Both skills are configured
+to stay available to the user without being invoked automatically.
 
 ## List
 
 | Skill | Description | Trigger |
 | ----- | ----------- | ------- |
-| `clean-code-architect` | Clean code review and architecture guidance | Auto on code generation/review |
-| `obsidian-cli` | Manage Obsidian vault via CLI | Manual — `/obsidian-cli` |
+| [`clean-code-architect`](clean-code-architect/) | Clean-code and anti-slop guidance for writing, reviewing, or refactoring code | Manual — `/clean-code-architect` |
+| [`obsidian-cli`](obsidian-cli/) | Manage an Obsidian vault through its CLI | Manual — `/obsidian-cli` |
 
 ## Installation
 
-Uses the [skills](https://www.npmjs.com/package/skills) CLI. No global install needed — just run via `npx`.
+Use the [skills](https://www.npmjs.com/package/skills) CLI through `npx`; no
+global install is needed.
 
 From the root of this repo, install a skill:
 
@@ -33,4 +36,4 @@ npx skills list                                    # View installed skills
 npx skills remove <skill_name>                     # Uninstall a skill
 ```
 
-💡 Remeber to restart Claude Code afterwards.
+Restart Claude Code after installing or updating a skill.
